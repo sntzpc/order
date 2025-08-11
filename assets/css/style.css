@@ -1,0 +1,27 @@
+/* Basic spacing for responsive tables */
+.table-responsive-container{
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid #eee;
+  border-radius: .5rem;
+  padding: .5rem;
+}
+/* Prevent table from blowing layout on small screens */
+table thead th, table tbody td{
+  white-space: nowrap;
+}
+/* Small helpers */
+.d-none{ display: none !important; }
+
+@media print {
+  body { background: #fff !important; }
+  nav.navbar, .nav-tabs, .btn, .form-select, .form-control { display: none !important; }
+  .tab-content { border: none !important; box-shadow: none !important; }
+  .card { box-shadow: none !important; border: 1px solid #ddd; }
+  .badge-status { border: 1px solid rgba(0,0,0,.12); }
+  .print-only { display: block !important; }
+}
+@media screen {
+  .print-only { display: none; }
+}
+
