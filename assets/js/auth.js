@@ -149,6 +149,7 @@ async function handleLogin(){
     await loadUiTabsConfig();
     // 2) Tampilkan navbar sesuai role
     applyRoleUI(data.role);
+    await primePriceCacheFromServer();
     await safeLoadUiTabsConfig();
     // 3) Init umum
     await initAfterLogin();
@@ -179,6 +180,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
     try {
       await loadUiTabsConfig();
       applyRoleUI(sess.role);
+      await primePriceCacheFromServer();
       await safeLoadUiTabsConfig();
       await initAfterLogin();
       setupLazyTabInit(sess.role);
@@ -209,5 +211,28 @@ async function safeLoadUiTabsConfig(){
         try { applyTabAccessFromCache(); } catch(_) {}
       }
     }
+  }
+}
+
+async function primePriceCacheFromServer(){
+  try{
+    const sess = getSession(); if (!sess) return;
+    const md = await apiPost('getMasterData', { token: sess.token });
+
+    // Prefer menu rows (punya flag is_default dan harga per item)
+    if (Array.isArray(md?.menu) && md.menu.length){
+      const rows = md.menu.map(m => ({
+        jenis: m.jenis,
+        harga_per_porsi: (m.harga ?? m.harga_per_porsi),
+        is_default: m.is_default
+      }));
+      priceCacheRebuildFromMenuRows(rows);
+    } else if (md?.defaultPrice) {
+      // Fallback: defaultPrice (obj {Snack:7000, ...})
+      priceCacheSave(md.defaultPrice);
+    }
+  }catch(e){
+    console.warn('[primePriceCacheFromServer] skip:', e);
+    // diam saja: biarkan pakai cache lokal yang sudah ada
   }
 }
