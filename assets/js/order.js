@@ -37,43 +37,32 @@ function kegiatanValue(){
 function getCurrentPriceForJenis(jenis){
   if (!jenis) return 0;
 
-  // 1) Live PRICE_CACHE (dari master.js)
-  const cache = window.PRICE_CACHE || priceCacheLoad();
-  if (cache && cache[jenis] != null) return Number(cache[jenis]) || 0;
+  // 1) dari PriceCache (utama)
+  const fromCache = (window.PriceCache && typeof PriceCache.getPrice === 'function')
+    ? PriceCache.getPrice(jenis) : 0;
+  if (fromCache) return fromCache;
 
-  // 2) MASTER.menu (default item yang is_default)
-  if (window.MASTER && Array.isArray(MASTER.menu)){
-    const def = MASTER.menu.find(m => String(m.jenis)===String(jenis) && isTrue(m.is_default));
-    if (def) return Number(def.harga || def.harga_per_porsi) || 0;
-  }
+  // 2) fallback: MASTER.defaultPrice (kalau ada)
+  const fallback = (window.MASTER && MASTER.defaultPrice && MASTER.defaultPrice[jenis] != null)
+    ? Number(MASTER.defaultPrice[jenis]) : 0;
 
-  // 3) MASTER.defaultPrice (fallback)
-  if (window.MASTER && MASTER.defaultPrice && MASTER.defaultPrice[jenis] != null){
-    return Number(MASTER.defaultPrice[jenis]) || 0;
-  }
-  return 0;
+  return fallback || 0;
 }
+
 
 // Perbarui label estimasi
 function updateEstimasi(){
   const jenisEl = document.getElementById('inpJenis');
   const porsiEl = document.getElementById('inpPorsi');
   const lbl     = document.getElementById('lblEstimasi');
-
   if (!jenisEl || !porsiEl || !lbl) return;
 
   const jenis = (jenisEl.value || '').trim();
   const porsi = parseInt(porsiEl.value || '0', 10) || 0;
 
-  const cache = window.PRICE_CACHE || priceCacheLoad();
-  const price =
-    Number(
-      (cache && cache[jenis] != null ? cache[jenis]
-        : (window.MASTER && MASTER.defaultPrice && MASTER.defaultPrice[jenis] != null
-            ? MASTER.defaultPrice[jenis] : 0))
-    ) || 0;
-
+  const price = getCurrentPriceForJenis(jenis);
   const total = price * porsi;
+
   lbl.textContent = 'Rp' + (typeof rupiah === 'function'
     ? rupiah(total)
     : total.toLocaleString('id-ID'));
@@ -82,17 +71,22 @@ function updateEstimasi(){
 
 
 // ---- Realtime estimation bindings (order.js) ----
-document.addEventListener('DOMContentLoaded', ()=>{
-  document.getElementById('inpJenis')?.addEventListener('change', updateEstimasi);
-  document.getElementById('inpPorsi')?.addEventListener('input',  updateEstimasi);
+(function bindRealtime(){
+  if (window.__order_rt_bound) return; window.__order_rt_bound = true;
 
-  // Saat harga di Setting berubah & cache diperbarui
-  window.addEventListener('pricecache:updated', updateEstimasi);
+  document.getElementById('inpJenis')?.addEventListener('change', updateEstimasi);
+  document.getElementById('inpJenis')?.addEventListener('input',  updateEstimasi);
+  document.getElementById('inpPorsi')?.addEventListener('input',  updateEstimasi);
+  document.getElementById('inpPorsi')?.addEventListener('change', updateEstimasi);
+
+  // Saat harga di Setting berubah
+  window.addEventListener('pricecache:updated',        updateEstimasi);
   window.addEventListener('msrie-price-cache-updated', updateEstimasi);
 
-  // Hitung sekali saat halaman siap
-  updateEstimasi();
-});
+  // Hitung sekali di awal
+  try { updateEstimasi(); } catch(_){}
+})();
+
 
 
 
@@ -119,16 +113,9 @@ async function initAfterLogin(){
     });
 
     // 3) Seed / load cache harga → WAJIB sebelum updateEstimasi()
-    const cur = priceCacheLoad();
-if (!cur || Object.keys(cur).length === 0){
-  const rows = Array.isArray(md.menu) ? md.menu.map(m => ({
-    jenis: m.jenis,
-    harga_per_porsi: (m.harga ?? m.harga_per_porsi),
-    is_default: m.is_default
-  })) : [];
-  priceCacheRebuildFromMenuRows(rows);
-} else {
-  window.PRICE_CACHE = cur; // expose supaya cepat
+    // setelah dapat md dari getMasterData:
+if (window.PriceCache && Array.isArray(md.menu)) {
+  try { PriceCache.setFromGetMasterData(md.menu); } catch(_){}
 }
 
     // 4) Hitung label estimasi pertama kali

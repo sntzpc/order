@@ -123,15 +123,11 @@ async function mdLoadEntity(entity){
     }
 
     // >>> Tambahan penting: update cache harga jika yang dimuat adalah Menu
-    if (entity === 'Menu') {
-  try {
-    if (typeof priceCacheRebuildFromMenuRows === 'function') {
-      priceCacheRebuildFromMenuRows(rows);
-    }
-  } catch(e){
-    console.warn('[master] skip price cache refresh:', e);
-  }
+    if (entity === 'Menu' && window.PriceCache) {
+  try { PriceCache.setFromMenuRows(rows); }
+  catch(e){ console.warn('[master] price cache refresh fail:', e); }
 }
+
 
   } catch(err){
     console.error('[master] mdLoadEntity error:', err);

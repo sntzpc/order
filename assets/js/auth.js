@@ -219,20 +219,20 @@ async function primePriceCacheFromServer(){
     const sess = getSession(); if (!sess) return;
     const md = await apiPost('getMasterData', { token: sess.token });
 
-    // Prefer menu rows (punya flag is_default dan harga per item)
-    if (Array.isArray(md?.menu) && md.menu.length){
-      const rows = md.menu.map(m => ({
-        jenis: m.jenis,
-        harga_per_porsi: (m.harga ?? m.harga_per_porsi),
-        is_default: m.is_default
-      }));
-      priceCacheRebuildFromMenuRows(rows);
-    } else if (md?.defaultPrice) {
-      // Fallback: defaultPrice (obj {Snack:7000, ...})
-      priceCacheSave(md.defaultPrice);
+    // Seed cache dari menu default
+    if (window.PriceCache) {
+      if (Array.isArray(md?.menu) && md.menu.length){
+        PriceCache.setFromGetMasterData(md.menu);
+      } else if (md?.defaultPrice) {
+        // fallback: mapping langsung
+        const rows = Object.entries(md.defaultPrice).map(([jenis, harga]) => ({
+          jenis, harga_per_porsi: harga, is_default: true
+        }));
+        PriceCache.setFromMenuRows(rows);
+      }
     }
   }catch(e){
     console.warn('[primePriceCacheFromServer] skip:', e);
-    // diam saja: biarkan pakai cache lokal yang sudah ada
   }
 }
+
