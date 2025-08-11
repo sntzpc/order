@@ -37,16 +37,25 @@ function kegiatanValue(){
 function getCurrentPriceForJenis(jenis){
   if (!jenis) return 0;
 
-  // 1) dari PriceCache (utama)
-  const fromCache = (window.PriceCache && typeof PriceCache.getPrice === 'function')
-    ? PriceCache.getPrice(jenis) : 0;
-  if (fromCache) return fromCache;
+  // 1) cache lokal
+  if (window.PriceCache) {
+    const p = PriceCache.getPrice(jenis);
+    if (!isNaN(p) && p > 0) return p;
+  }
 
-  // 2) fallback: MASTER.defaultPrice (kalau ada)
-  const fallback = (window.MASTER && MASTER.defaultPrice && MASTER.defaultPrice[jenis] != null)
-    ? Number(MASTER.defaultPrice[jenis]) : 0;
+  // 2) MASTER.menu (default)
+  if (window.MASTER && Array.isArray(MASTER.menu)) {
+    const def = MASTER.menu.find(m =>
+      m.jenis === jenis && (m.is_default === true || String(m.is_default).toLowerCase() === 'true' || m.is_default === 'TRUE')
+    );
+    if (def) return Number(def.harga ?? def.harga_per_porsi) || 0;
+  }
 
-  return fallback || 0;
+  // 3) fallback MASTER.defaultPrice
+  if (window.MASTER?.defaultPrice && MASTER.defaultPrice[jenis] != null) {
+    return Number(MASTER.defaultPrice[jenis]) || 0;
+  }
+  return 0;
 }
 
 
@@ -69,8 +78,38 @@ function updateEstimasi(){
 }
 
 
+async function initAfterLogin(){
+  const sess = getSession();
+  const md = await apiPost('getMasterData', { token: sess.token });
+  window.MASTER = md || {};
 
-// ---- Realtime estimation bindings (order.js) ----
+  // isi dropdown
+  inpKegiatan.innerHTML = '';
+  (md.activities||[]).forEach(a=>{
+    const o = document.createElement('option');
+    o.value = a.nama; o.textContent = a.nama;
+    inpKegiatan.appendChild(o);
+  });
+  inpMess.innerHTML = '<option value="">Tentukan oleh Admin</option>';
+  (md.messList||[]).forEach(m=>{
+    const o = document.createElement('option');
+    o.value = m.nama; o.textContent = m.nama;
+    inpMess.appendChild(o);
+  });
+
+  // seed cache (aman dipanggil berulang)
+  if (window.PriceCache && Array.isArray(md.menu)) {
+    PriceCache.setFromGetMasterData(md.menu);
+  }
+
+  // hitung pertama kali
+  updateEstimasi();
+
+  // lalu load daftar order
+  await refreshOrders();
+}
+
+// Realtime bindings (cukup sekali)
 (function bindRealtime(){
   if (window.__order_rt_bound) return; window.__order_rt_bound = true;
 
@@ -79,54 +118,13 @@ function updateEstimasi(){
   document.getElementById('inpPorsi')?.addEventListener('input',  updateEstimasi);
   document.getElementById('inpPorsi')?.addEventListener('change', updateEstimasi);
 
-  // Saat harga di Setting berubah
-  window.addEventListener('pricecache:updated',        updateEstimasi);
-  window.addEventListener('msrie-price-cache-updated', updateEstimasi);
+  // Ketika Setting → Menu diubah (via master.js), cache akan broadcast event ini
+  window.addEventListener('pricecache:updated', updateEstimasi);
+window.addEventListener('msrie-price-cache-updated', updateEstimasi);
 
-  // Hitung sekali di awal
+  // Hitung sekali di awal (kalau DOM sudah ada)
   try { updateEstimasi(); } catch(_){}
 })();
-
-
-
-
-
-async function initAfterLogin(){
-  try{
-    const sess = getSession();
-    const md = await apiPost('getMasterData', { token: sess.token });
-    window.MASTER = md || {}; // ← 1) MASTER siap
-
-    // 2) Isi dropdown kegiatan & mess
-    inpKegiatan.innerHTML = '';
-    (md.activities||[]).forEach(a=>{
-      const opt = document.createElement('option');
-      opt.value = a.nama; opt.textContent = a.nama;
-      inpKegiatan.appendChild(opt);
-    });
-
-    inpMess.innerHTML = '<option value="">Tentukan oleh Admin</option>';
-    (md.messList||[]).forEach(m=>{
-      const opt = document.createElement('option');
-      opt.value = m.nama; opt.textContent = m.nama;
-      inpMess.appendChild(opt);
-    });
-
-    // 3) Seed / load cache harga → WAJIB sebelum updateEstimasi()
-    // setelah dapat md dari getMasterData:
-if (window.PriceCache && Array.isArray(md.menu)) {
-  try { PriceCache.setFromGetMasterData(md.menu); } catch(_){}
-}
-
-    // 4) Hitung label estimasi pertama kali
-    updateEstimasi();
-
-    // 5) Baru load daftar order
-    await refreshOrders();
-  } catch(err){
-    toastError(err.message || err);
-  }
-}
 
 
 btnSubmit.addEventListener('click', async ()=>{
@@ -238,125 +236,68 @@ if (typeof window.withBtnBusy !== 'function') {
 
 // 2) Modal Pilih Waktu (aman jika elemen belum ada)
 document.addEventListener('DOMContentLoaded', ()=>{
-  const btnPick   = document.getElementById('btnPickWaktu');
-  const inpWaktu  = document.getElementById('inpWaktu');
-  const modalEl   = document.getElementById('modalWaktu');
-  const formWaktu = document.getElementById('formWaktu');
-  const mwTanggal = document.getElementById('mwTanggal');
-  const mwWaktu   = document.getElementById('mwWaktu');
+  // --- Bind modal pilih waktu (idempotent)
+  if (!window.__bind_waktu_modal){
+    window.__bind_waktu_modal = true;
 
-  // Kalau salah satu tidak ada, lewati (tidak error)
-  if (!btnPick || !inpWaktu || !modalEl || !formWaktu || !mwTanggal || !mwWaktu) return;
+    const btnPick   = document.getElementById('btnPickWaktu');
+    const inpWaktu  = document.getElementById('inpWaktu');
+    const modalEl   = document.getElementById('modalWaktu');
+    const formWaktu = document.getElementById('formWaktu');
+    const mwTanggal = document.getElementById('mwTanggal');
+    const mwWaktu   = document.getElementById('mwWaktu');
 
-  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    if (btnPick && inpWaktu && modalEl && formWaktu && mwTanggal && mwWaktu){
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      const z = n => String(n).padStart(2,'0');
+      const toInputDate = d => `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+      const toInputTime = d => `${z(d.getHours())}:${z(d.getMinutes())}`;
 
-  function toInputDate(d){ const z=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`; }
-  function toInputTime(d){ const z=n=>String(n).padStart(2,'0'); return `${z(d.getHours())}:${z(d.getMinutes())}`; }
+      btnPick.addEventListener('click', ()=>{
+        let d = new Date();
+        if (inpWaktu.value){
+          const t = new Date(inpWaktu.value);
+          if (!isNaN(t.getTime())) d = t;
+        }
+        mwTanggal.value = toInputDate(d);
+        mwWaktu.value   = toInputTime(d);
+        modal.show();
+      });
 
-  btnPick.addEventListener('click', ()=>{
-    let d = new Date();
-    if (inpWaktu.value){
-      const t = new Date(inpWaktu.value);
-      if (!isNaN(t.getTime())) d = t;
+      formWaktu.addEventListener('submit', (e)=>{
+        e.preventDefault();
+        const tgl = (mwTanggal.value||'').trim();
+        const jam = (mwWaktu.value||'').trim();
+        if (!tgl || !jam) return;
+        inpWaktu.value = `${tgl}T${jam}`;
+        modal.hide();
+      });
     }
-    mwTanggal.value = toInputDate(d);
-    mwWaktu.value   = toInputTime(d);
-    modal.show();
-  });
-
-  formWaktu.addEventListener('submit', (e)=>{
-    e.preventDefault();
-    const tgl = (mwTanggal.value||'').trim();
-    const jam = (mwWaktu.value||'').trim();
-    if (!tgl || !jam) return;
-    inpWaktu.value = `${tgl}T${jam}`;
-    modal.hide();
-  });
-});
-
-// 3) Tombol Submit: tampilkan loading + tetap hormati handler lama
-document.addEventListener('DOMContentLoaded', ()=>{
-  const btnSubmit = document.getElementById('btnSubmit');
-  if (!btnSubmit) return;
-
-  // Simpan handler klik default (jika ada yang sudah di-assign via onclick)
-  const oldOnClick = btnSubmit.onclick;
-
-  // Realtime: saat user ngetik/ganti nilai
-['input','change'].forEach(ev => {
-  inpJenis.addEventListener(ev, updateEstimasi);
-  inpPorsi.addEventListener(ev, updateEstimasi);
-});
-
-// Jika cache harga berubah (akibat Setting → Menu disimpan), refresh label
-window.addEventListener('msrie-price-cache-updated', () => {
-  // optional: sinkronkan MASTER.defaultPrice agar bagian lain yg pakai MASTER tetap konsisten
-  if (window.MASTER) MASTER.defaultPrice = PriceCache.getAll();
-  updateEstimasi();
-});
-
-  // Hapus listener klik ganda lain yang mungkin sudah dipasang — tidak kita sentuh.
-  // Kita hanya menambahkan 1 listener di bawah yang akan menjalankan alur lama:
-  btnSubmit.addEventListener('click', async (ev)=>{
-    // Jika ada handler lama yang *butuh* event default, kita panggil preventDefault di dalam wrapper
-    ev.preventDefault();
-
-    await withBtnBusy(btnSubmit, async ()=>{
-      // 1) Jika proyek punya fungsi submitOrder() eksplisit, pakai itu
-      if (typeof window.submitOrder === 'function') {
-        return await window.submitOrder(ev);
-      }
-      // 2) Jika ada handler onclick lama, jalankan
-      if (typeof oldOnClick === 'function') {
-        return await oldOnClick.call(btnSubmit, ev);
-      }
-      // 3) Fallback: kalau sebelumnya mengandalkan submit form, coba submit form terdekat
-      const form = btnSubmit.closest('form');
-      if (form) {
-        form.requestSubmit ? form.requestSubmit() : form.submit();
-      }
-      // tidak ada apa-apa? ya sudah: selesai tanpa error
-    });
-  }, { passive: false });
-});
-
-
-// --- REBINDER: estimasi realtime (anti dobel + anti timing) ---
-(function(){
-  if (window.__msrieOrderBound) return;
-  window.__msrieOrderBound = true;
-
-  // Sinkronkan nama event: dengarkan KEDUANYA
-  const onPriceCacheUpdated = ()=> { try { updateEstimasi(); } catch(e){} };
-  window.addEventListener('msrie-price-cache-updated', onPriceCacheUpdated);
-  window.addEventListener('pricecache:updated',        onPriceCacheUpdated);
-
-  function bindInputs(){
-    const jenis = document.getElementById('inpJenis');
-    const porsi = document.getElementById('inpPorsi');
-    if (jenis && !jenis.__boundEstimasi){
-      jenis.addEventListener('change', updateEstimasi);
-      jenis.addEventListener('input',  updateEstimasi);
-      jenis.__boundEstimasi = true;
-    }
-    if (porsi && !porsi.__boundEstimasi){
-      porsi.addEventListener('input',  updateEstimasi);
-      porsi.addEventListener('change', updateEstimasi);
-      porsi.__boundEstimasi = true;
-    }
-    // hitung sekali
-    try { updateEstimasi(); } catch(e){}
   }
 
-  // Bind saat DOM siap
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', bindInputs);
-  } else { bindInputs(); }
+  // --- Bind tombol submit (idempotent)
+  if (!window.__bind_submit_btn){
+    window.__bind_submit_btn = true;
 
-  // Bind ulang saat tab Order diaktifkan (kalau kamu pakai lazy tab)
-  document.querySelectorAll('#menuTabs a[data-bs-toggle="tab"]').forEach(a=>{
-    a.addEventListener('shown.bs.tab', (ev)=>{
-      if (ev.target.getAttribute('href') === '#tabOrder') bindInputs();
-    });
-  });
-})();
+    const btnSubmit = document.getElementById('btnSubmit');
+    if (btnSubmit){
+      const oldOnClick = btnSubmit.onclick;
+      btnSubmit.addEventListener('click', async (ev)=>{
+        ev.preventDefault();
+        await (window.withBtnBusy ? withBtnBusy(btnSubmit, async ()=>{
+          if (typeof window.submitOrder === 'function') return await submitOrder(ev);
+          if (typeof oldOnClick === 'function') return await oldOnClick.call(btnSubmit, ev);
+          const form = btnSubmit.closest('form');
+          if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
+        }) : (async ()=>{
+          if (typeof window.submitOrder === 'function') return await submitOrder(ev);
+          if (typeof oldOnClick === 'function') return await oldOnClick.call(btnSubmit, ev);
+          const form = btnSubmit.closest('form');
+          if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
+        })());
+      }, { passive:false });
+    }
+  }
+});
+
+

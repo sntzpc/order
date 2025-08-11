@@ -215,24 +215,15 @@ async function safeLoadUiTabsConfig(){
 }
 
 async function primePriceCacheFromServer(){
-  try{
-    const sess = getSession(); if (!sess) return;
-    const md = await apiPost('getMasterData', { token: sess.token });
+  const sess = getSession(); if (!sess) return;
+  const md = await apiPost('getMasterData', { token: sess.token });
 
-    // Seed cache dari menu default
-    if (window.PriceCache) {
-      if (Array.isArray(md?.menu) && md.menu.length){
-        PriceCache.setFromGetMasterData(md.menu);
-      } else if (md?.defaultPrice) {
-        // fallback: mapping langsung
-        const rows = Object.entries(md.defaultPrice).map(([jenis, harga]) => ({
-          jenis, harga_per_porsi: harga, is_default: true
-        }));
-        PriceCache.setFromMenuRows(rows);
-      }
-    }
-  }catch(e){
-    console.warn('[primePriceCacheFromServer] skip:', e);
+  if (Array.isArray(md?.menu) && window.PriceCache) {
+    PriceCache.setFromGetMasterData(md.menu);
+  } else if (md?.defaultPrice && window.PriceCache) {
+    PriceCache._data.byJenis = { ...md.defaultPrice };
+    PriceCache.save();
   }
 }
+
 

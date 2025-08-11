@@ -1,45 +1,67 @@
-// assets/js/price-cache.js
-(function(){
-  const LS_KEY = 'price_cache_v1';
+(function () {
+  const LS_KEY = 'msrie_prices_v1';
 
-  function load(){
-    try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; }
-    catch(_) { return {}; }
-  }
+  const api = {
+    _data: { byJenis: {}, updatedAt: 0 },
 
-  function save(cache){
-    try { localStorage.setItem(LS_KEY, JSON.stringify(cache || {})); } catch(_){}
-    // expose ke global agar cepat diakses tanpa JSON.parse
-    window.PRICE_CACHE = cache || {};
-    // broadcast (dua nama event supaya kompatibel dg kode lama)
-    const detail = window.PRICE_CACHE;
-    window.dispatchEvent(new CustomEvent('pricecache:updated',        { detail }));
-    window.dispatchEvent(new CustomEvent('msrie-price-cache-updated', { detail }));
-  }
+    load() {
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        if (raw) this._data = JSON.parse(raw) || this._data;
+      } catch (_) {}
+      // seed global cache for quick read
+      window.PRICE_CACHE = { ...this._data.byJenis };
+      return window.PRICE_CACHE;
+    },
 
-  function isTrue(v){
-    if (typeof v === 'boolean') return v;
-    const s = String(v).trim().toLowerCase();
-    return ['true','1','yes','ya','y','aktif','active'].includes(s);
-  }
+    save() {
+      try {
+        this._data.updatedAt = Date.now();
+        localStorage.setItem(LS_KEY, JSON.stringify(this._data));
+      } catch (_) {}
+      const detail = { ...this._data.byJenis };
+      window.PRICE_CACHE = detail;
+      // keep both events for compatibility
+      window.dispatchEvent(new CustomEvent('pricecache:updated', { detail }));
+      window.dispatchEvent(new CustomEvent('msrie-price-cache-updated', { detail }));
+    },
 
-  // Bangun cache dari baris "Menu" (ambil yang is_default)
-  function rebuildFromMenuRows(rows){
-    const cache = {};
-    (rows || []).forEach(r=>{
-      if (isTrue(r.is_default)) {
-        const jenis = String(r.jenis || '').trim();
-        if (jenis) cache[jenis] = Number(r.harga_per_porsi ?? r.harga ?? 0) || 0;
+    // dari getMasterData (front-office)
+    setFromGetMasterData(menuList) {
+      const byJenis = {};
+      (menuList || []).forEach(m => {
+        const isDef = m.is_default === true || String(m.is_default).toLowerCase() === 'true';
+        const harga = Number(m.harga ?? m.harga_per_porsi) || 0;
+        if (isDef) byJenis[m.jenis] = harga;
+      });
+      if (Object.keys(byJenis).length) {
+        this._data.byJenis = byJenis;
+        this.save();
       }
-    });
-    save(cache);
-  }
+    },
 
-  // expose helpers
-  window.priceCacheLoad = load;
-  window.priceCacheSave = save;
-  window.priceCacheRebuildFromMenuRows = rebuildFromMenuRows;
+    // dari mdList('Menu') (back-office/Setting)
+    setFromMenuRows(rows) {
+      const byJenis = {};
+      (rows || []).forEach(r => {
+        const isDef = r.is_default === true
+          || r.is_default === 'TRUE'
+          || String(r.is_default).toLowerCase() === 'true'
+          || r.is_default === 1;
+        const harga = Number(r.harga_per_porsi) || 0;
+        if (isDef) byJenis[r.jenis] = harga;
+      });
+      if (Object.keys(byJenis).length) {
+        this._data.byJenis = byJenis;
+        this.save();
+      }
+    },
 
-  // prime dari localStorage saat pertama kali file ini diload
-  window.PRICE_CACHE = load();
+    getPrice(jenis) { return Number(this._data.byJenis[jenis] || 0); },
+    getAll() { return { ...this._data.byJenis }; }
+  };
+
+  // expose & prime once
+  api.load();
+  window.PriceCache = api;
 })();
