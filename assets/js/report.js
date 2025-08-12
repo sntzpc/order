@@ -1,78 +1,83 @@
-// ==== NUMERIC HELPERS (baru) ====
-// Konversi string "12.000", "12,5", "Rp 12.000" -> number 12000 / 12.5
+// =========================
+// report.js (bersih & rapi)
+// =========================
+
+// -------- Numeric helpers --------
 function toNumberStrict(v){
   if (v === '' || v == null) return null;
   if (typeof v === 'number') return isFinite(v) ? v : null;
   let s = String(v).trim();
-  // buang simbol non-angka kecuali . , - 
-  s = s.replace(/[^\d,.-]/g,'');
-  // anggap format Indonesia: titik = thousand, koma = decimal
-  // ubah ribuan titik -> kosong, koma -> titik
-  s = s.replace(/\./g,'').replace(/,/g,'.');
+  s = s.replace(/[^\d,.-]/g,'');             // buang non-digit kecuali , . -
+  s = s.replace(/\./g,'').replace(/,/g,'.'); // asumsi lokal: . ribuan, , desimal
   const n = Number(s);
   return isFinite(n) ? n : null;
 }
 function num0(v){ const n = toNumberStrict(v); return n==null || isNaN(n) ? 0 : n; }
-// hitung total biaya dgn fallback
 function calcTotalBiaya(row){
   const pr = num0(row.price_per_porsi);
   const po = num0(row.porsi);
   const tb = toNumberStrict(row.total_biaya);
-  // jika total_biaya valid & >0, pakai itu; jika tidak, fallback ke pr*po
   const fallback = pr * po;
   return (tb!=null && !isNaN(tb) && tb>0) ? tb : (isFinite(fallback) ? fallback : 0);
 }
 
-
-// ==== REPORT & EXPORT (Admin + Mess) ====
-// Menggunakan getOrders (role-aware) + Chart.js + SheetJS
-// Fitur tambahan: multi-sheet export (per Status & Jenis), Pivot Harian & Bulanan, Print-friendly
-
-
-let rp = { els:{}, charts:{ status:null, jenis:null }, data:[] };
-
+// -------- Konstanta & util DOM --------
 const STATUS_LIST = ['Pending','Dialokasikan','Diterima','Disiapkan','Siap','Selesai','Rejected'];
 const JENIS_LIST  = ['Snack','Nasi Kotak'];
 
 function $(id){ return document.getElementById(id); }
 
-async function reportInit(){
-  // Query elemen panel
-  rp.els.from      = $('repFrom');
-  rp.els.to        = $('repTo');
-  rp.els.status    = $('repStatus');
-  rp.els.jenis     = $('repJenis');
-  rp.els.btnApply  = $('btnRepApply');
-  rp.els.btnReset  = $('btnRepReset');
-  rp.els.btnExport = $('btnRepExport');
-  rp.els.btnPrint  = $('btnRepPrint');
-  rp.els.kpiTotal  = $('kpiTotal');
-  rp.els.kpiPorsi  = $('kpiPorsi');
-  rp.els.kpiBiaya  = $('kpiBiaya');
-  rp.els.kpiDone   = $('kpiDone');
-
-  // Kalau panel belum ada, skip (misal role User)
-  if (!rp.els.btnApply) return;
-
-  // Range default: bulan berjalan
-  const today = new Date(); const y = today.getFullYear(), m = today.getMonth();
-  rp.els.from.value = toInputDate(new Date(y, m, 1));
-  rp.els.to.value   = toInputDate(new Date(y, m+1, 0));
-
-  // Events
-  rp.els.btnApply.addEventListener('click', ()=> withBtnBusy(rp.els.btnApply, loadReport));
-  rp.els.btnReset.addEventListener('click', resetFilters);
-  if (rp.els.btnExport) rp.els.btnExport.addEventListener('click', ()=> withBtnBusy(rp.els.btnExport, async ()=> exportXlsx()));
-  if (rp.els.btnPrint)  rp.els.btnPrint.addEventListener('click',  ()=> withBtnBusy(rp.els.btnPrint,  async ()=> printReport()));
-
-  await loadReport();
+function normalizeJenis(x){
+  const s = String(x || '').trim().toLowerCase();
+  if (!s) return '';
+  if (s.startsWith('snack')) return 'Snack';
+  if (s.includes('nasi') && s.includes('kotak')) return 'Nasi Kotak';
+  return s.replace(/\b\w/g, c=>c.toUpperCase());
 }
 
+// -------- State --------
+const rp = {
+  els: {},
+  charts: { status:null, jenis:null },
+  data: [],
+  defPrice: { Snack: 0, 'Nasi Kotak': 0, _ready: false }
+};
+
+// -------- Ambil default price dari Master --------
+async function ensureDefaultPrices(token){
+  if (rp.defPrice && rp.defPrice._ready) return rp.defPrice;
+
+  const res = await apiPost('getMasterData', { token });
+
+  // 1) gunakan defaultPrice dari backend bila ada
+  if (res && typeof res.defaultPrice === 'object'){
+    const s = toNumberStrict(res.defaultPrice['Snack']);
+    const n = toNumberStrict(res.defaultPrice['Nasi Kotak']);
+    if (s && s>0) rp.defPrice.Snack = s;
+    if (n && n>0) rp.defPrice['Nasi Kotak'] = n;
+  }
+
+  // 2) bila belum, cari dari menu default
+  const menu = Array.isArray(res?.menu) ? res.menu : [];
+  ['Snack','Nasi Kotak'].forEach(jenis=>{
+    if (rp.defPrice[jenis] > 0) return;
+    const row = menu.find(m =>
+      String(m?.jenis||'').trim().toLowerCase() === jenis.toLowerCase() &&
+      (m?.is_default === true || String(m?.is_default).toUpperCase() === 'TRUE')
+    );
+    const h = toNumberStrict(row?.harga);
+    if (h && h>0) rp.defPrice[jenis] = h;
+  });
+
+  rp.defPrice._ready = true;
+  return rp.defPrice;
+}
+
+// -------- Tanggal helpers --------
 function toInputDate(d){ const z=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`; }
 
 function parseToDateOnly(str){
   if (!str) return '';
-  // coba ambil YYYY-MM-DD di depan
   const m = String(str).match(/^(\d{4}-\d{2}-\d{2})/);
   if (m) return m[1];
   const d = new Date(str);
@@ -88,6 +93,39 @@ function monthKey(yyyy_mm_dd){
   return '';
 }
 
+// -------- Init Report --------
+async function reportInit(){
+  rp.els.from      = $('repFrom');
+  rp.els.to        = $('repTo');
+  rp.els.status    = $('repStatus');
+  rp.els.jenis     = $('repJenis');
+  rp.els.btnApply  = $('btnRepApply');
+  rp.els.btnReset  = $('btnRepReset');
+  rp.els.btnExport = $('btnRepExport');
+  rp.els.btnPrint  = $('btnRepPrint');
+  rp.els.kpiTotal  = $('kpiTotal');
+  rp.els.kpiPorsi  = $('kpiPorsi');
+  rp.els.kpiBiaya  = $('kpiBiaya');
+  rp.els.kpiDone   = $('kpiDone');
+
+  // jika panel tidak ada (misal role tertentu), hentikan
+  if (!rp.els.btnApply) return;
+
+  // default: bulan berjalan
+  const today = new Date(); const y = today.getFullYear(), m = today.getMonth();
+  rp.els.from.value = toInputDate(new Date(y, m, 1));
+  rp.els.to.value   = toInputDate(new Date(y, m+1, 0));
+
+  // events
+  rp.els.btnApply.addEventListener('click', ()=> withBtnBusy(rp.els.btnApply, loadReport));
+  rp.els.btnReset.addEventListener('click', resetFilters);
+  if (rp.els.btnExport) rp.els.btnExport.addEventListener('click', ()=> withBtnBusy(rp.els.btnExport, async ()=> exportXlsx()));
+  if (rp.els.btnPrint)  rp.els.btnPrint.addEventListener('click',  ()=> withBtnBusy(rp.els.btnPrint,  async ()=> printReport()));
+
+  await loadReport();
+}
+
+// -------- Load data & render --------
 async function loadReport(){
   const sess = getSession();
   const params = {
@@ -97,45 +135,49 @@ async function loadReport(){
     status:    (rp.els.status.value||'').trim(),
     jenis:     (rp.els.jenis.value||'').trim()
   };
+
   try{
     const res = await apiPost('getOrders', params);
+    if (!res || !Array.isArray(res.orders)){
+      rp.data = [];
+      renderKpis(rp.data);
+      renderCharts(rp.data);
+      return toastError('Data pesanan tidak valid.');
+    }
 
-    // Simpan apa adanya, tapi koersi tipe angka ke number/null.
-    rp.data = (Array.isArray(res.orders) ? res.orders : []).map(r=>{
-      const porsi = num0(r.porsi);
-      const price = toNumberStrict(r.price_per_porsi);
-      const total = toNumberStrict(r.total_biaya);
+    await ensureDefaultPrices(sess.token);
+
+    // mapping data, fallback harga default per jenis
+    rp.data = res.orders.map(r=>{
+      const jenis = normalizeJenis(r.jenis);
+      const po    = num0(r.porsi);
+      const prOrd = toNumberStrict(r.price_per_porsi);
+      const prDef = num0(rp.defPrice[jenis]);
+
+      const pr = (prOrd && prOrd>0) ? prOrd : ((prDef && prDef>0) ? prDef : 0);
+      const tbRaw = toNumberStrict(r.total_biaya);
+      const tt    = (tbRaw && tbRaw>0) ? tbRaw : (pr * po);
+
       return Object.assign({}, r, {
-        porsi: porsi,
-        price_per_porsi: (price!=null ? price : null),
-        total_biaya:     (total!=null ? total : null),
-        // siapkan kolom turunan agar konsisten dipakai tabel/export
-        _total_calc: calcTotalBiaya({ price_per_porsi: price, porsi, total_biaya: total })
+        jenis,
+        porsi: po,
+        price_per_porsi: pr || null,
+        total_biaya:     tt || null
       });
     });
 
     renderKpis(rp.data);
     renderCharts(rp.data);
     toastSuccess('Laporan diperbarui.');
-  }catch(e){ toastError(e.message || e); }
+  }catch(e){
+    toastError(e?.message || e || 'Gagal memuat laporan.');
+  }
 }
 
-
+// -------- Filters --------
 function resetFilters(){ rp.els.status.value=''; rp.els.jenis.value=''; }
 
-// === CCTV (opsional) ===
-const DEBUG_CCTV = false;
-if (DEBUG_CCTV) {
-  console.group('[CCTV] Sampel perhitungan total_biaya');
-  (rp.data || []).slice(0, 10).forEach((r,i)=>{
-    const pr = num0(r.price_per_porsi), po = num0(r.porsi);
-    const tbRaw = toNumberStrict(r.total_biaya);
-    const tt = calcTotalBiaya(r);
-    console.log(`#${i+1}`, { id:r.id, pr, po, tbRaw, total_calc: tt, status:r.status, jenis:r.jenis });
-  });
-  console.groupEnd();
-}
-
+// -------- KPI --------
 function renderKpis(list){
   let total = 0, porsi = 0, biaya = 0, done = 0;
   (list || []).forEach(r=>{
@@ -144,44 +186,141 @@ function renderKpis(list){
     biaya += calcTotalBiaya(r);
     if (r.status === 'Selesai') done++;
   });
-  rp.els.kpiTotal.textContent = total.toLocaleString('id-ID');
-  rp.els.kpiPorsi.textContent = porsi.toLocaleString('id-ID');
-  rp.els.kpiBiaya.textContent = biaya.toLocaleString('id-ID');
-  rp.els.kpiDone.textContent  = done.toLocaleString('id-ID');
-}
-function renderCharts(list){
-  // Destroy chart lama agar tidak dobel
-  if (rp.charts.status){ rp.charts.status.destroy(); rp.charts.status = null; }
-  if (rp.charts.jenis){ rp.charts.jenis.destroy(); rp.charts.jenis = null; }
 
-  // Data per status
+  if (rp.els.kpiTotal) rp.els.kpiTotal.textContent = total.toLocaleString('id-ID');
+  if (rp.els.kpiPorsi) rp.els.kpiPorsi.textContent = porsi.toLocaleString('id-ID');
+  if (rp.els.kpiBiaya) rp.els.kpiBiaya.textContent = biaya.toLocaleString('id-ID');
+  if (rp.els.kpiDone)  rp.els.kpiDone.textContent  = done.toLocaleString('id-ID');
+}
+
+// -------- Charts --------
+function renderCharts(list){
+  if (rp.charts.status){ rp.charts.status.destroy(); rp.charts.status = null; }
+  if (rp.charts.jenis){  rp.charts.jenis.destroy();  rp.charts.jenis  = null; }
+
+  // per status
   const statusCount = Object.fromEntries(STATUS_LIST.map(s => [s, 0]));
-  list.forEach(r => { if (statusCount[r.status] != null) statusCount[r.status]++; });
+  (list||[]).forEach(r => { if (statusCount[r.status] != null) statusCount[r.status]++; });
 
   const ctxS = $('chStatus')?.getContext('2d');
   if (ctxS){
     rp.charts.status = new Chart(ctxS, {
       type: 'bar',
       data: { labels: STATUS_LIST, datasets: [{ label: 'Jumlah', data: STATUS_LIST.map(s=>statusCount[s]) }] },
-      options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+      options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
     });
   }
 
-  // Data per jenis
+  // per jenis
   const jenisCount = Object.fromEntries(JENIS_LIST.map(j => [j, 0]));
-  list.forEach(r => { if (jenisCount[r.jenis] != null) jenisCount[r.jenis]++; });
+  (list||[]).forEach(r => { if (jenisCount[r.jenis] != null) jenisCount[r.jenis]++; });
 
   const ctxJ = $('chJenis')?.getContext('2d');
   if (ctxJ){
     rp.charts.jenis = new Chart(ctxJ, {
       type: 'doughnut',
       data: { labels: JENIS_LIST, datasets: [{ data: JENIS_LIST.map(j=>jenisCount[j]) }] },
-      options: { responsive: true, plugins: { legend: { position: 'bottom' } }, cutout: '60%' }
+      options: { responsive:true, plugins:{ legend:{ position:'bottom' } }, cutout:'60%' }
     });
   }
 }
 
-// ===== Helpers: export/pivot/group =====
+// -------- Grouping & Pivot --------
+function groupBy(data, keyFn){
+  const m = new Map();
+  (data||[]).forEach(item => {
+    const k = keyFn(item);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(item);
+  });
+  return m;
+}
+function newAccumulator(){
+  return {
+    totalOrders: 0, totalPorsi: 0, totalBiaya: 0,
+    status: Object.fromEntries(STATUS_LIST.map(s=>[s,0])),
+    jenis:  Object.fromEntries(JENIS_LIST.map(j=>[j,0]))
+  };
+}
+function accumulate(acc, r){
+  const tt = calcTotalBiaya(r);
+  acc.totalOrders++;
+  acc.totalPorsi += num0(r.porsi);
+  acc.totalBiaya += tt;
+  if (acc.status[r.status] != null) acc.status[r.status]++;
+  if (acc.jenis[r.jenis]   != null) acc.jenis[r.jenis]++;
+}
+function pivotHeader(firstColName='Tanggal'){
+  return [
+    firstColName,'Total Pesanan','Total Porsi','Total Biaya (Rp)',
+    ...STATUS_LIST.map(s=>'# '+s),
+    ...JENIS_LIST.map(j=>'# '+j)
+  ];
+}
+function pivotRowOut(key, acc){
+  return [
+    key,
+    acc.totalOrders,
+    acc.totalPorsi,
+    acc.totalBiaya,
+    ...STATUS_LIST.map(s=>acc.status[s]),
+    ...JENIS_LIST.map(j=>acc.jenis[j])
+  ];
+}
+function parseToDateOnlyOrCreated(r){
+  return parseToDateOnly(r.waktu_pakai || r.created_at) || '';
+}
+function monthKeyFromRow(r){
+  const d = parseToDateOnlyOrCreated(r);
+  return monthKey(d);
+}
+function pivotDaily(data){
+  const days = new Map();
+  (data||[]).forEach(r=>{
+    const d = parseToDateOnlyOrCreated(r);
+    if (!d) return;
+    if (!days.has(d)) days.set(d, newAccumulator());
+    accumulate(days.get(d), r);
+  });
+  const header = pivotHeader();
+  const body = [...days.keys()].sort().map(d => pivotRowOut(d, days.get(d)));
+  return { header, body };
+}
+function pivotMonthly(data){
+  const months = new Map();
+  (data||[]).forEach(r=>{
+    const mk = monthKeyFromRow(r);
+    if (!mk) return;
+    if (!months.has(mk)) months.set(mk, newAccumulator());
+    accumulate(months.get(mk), r);
+  });
+  const header = pivotHeader('Bulan');
+  const body = [...months.keys()].sort().map(k => pivotRowOut(k, months.get(k)));
+  return { header, body };
+}
+
+// -------- XLSX helpers --------
+function autoFitColumns(ws, rows, columns){
+  const colsArr = Array.isArray(columns)
+    ? columns
+    : (rows && rows.length ? Object.keys(rows[0]) : []);
+  const lens = colsArr.map(c => Math.max(String(c).length, ...rows.map(r => String(r[c] ?? '').length)));
+  ws['!cols'] = lens.map(w => ({ wch: Math.min(Math.max(w + 2, 10), 50) }));
+}
+function autoFitAOA(ws, aoa){
+  const cols = new Array(Math.max(...aoa.map(r=>r.length))).fill(0);
+  aoa.forEach(r => r.forEach((v,i) => { cols[i] = Math.max(cols[i], String(v ?? '').length); }));
+  ws['!cols'] = cols.map(w => ({ wch: Math.min(Math.max(w + 2, 8), 50) }));
+}
+function safeSheetName(name){
+  return String(name).replace(/[\\/?*\[\]:]/g,'_').slice(0,31) || 'Sheet';
+}
+function safeReplaceAll(str, find, repl){
+  if (str && typeof str.replaceAll === 'function') return str.replaceAll(find, repl);
+  return String(str || '').split(find).join(repl);
+}
+
+// -------- Build rows untuk Orders --------
 function buildOrdersRows(data){
   const cols = ['id','created_at','username','display_name','jenis','waktu_pakai','porsi','kegiatan','allocated_mess','status','price_per_porsi','total_biaya','catatan'];
   const rows = (data || []).map(r => {
@@ -206,94 +345,8 @@ function buildOrdersRows(data){
   });
   return { cols, rows };
 }
-function groupBy(data, keyFn){
-  const m = new Map();
-  data.forEach(item => {
-    const k = keyFn(item);
-    if (!m.has(k)) m.set(k, []);
-    m.get(k).push(item);
-  });
-  return m;
-}
-function pivotDaily(data){
-  const days = new Map(); // key: yyyy-mm-dd
-  data.forEach(r=>{
-    const d = parseToDateOnly(r.waktu_pakai || r.created_at) || '';
-    if (!d) return;
-    if (!days.has(d)) days.set(d, newAccumulator());
-    accumulate(days.get(d), r);
-  });
-  const header = pivotHeader();
-  const body = [...days.keys()].sort().map(d => pivotRowOut(d, days.get(d)));
-  return { header, body };
-}
-function pivotMonthly(data){
-  const months = new Map(); // key: yyyy-mm
-  data.forEach(r=>{
-    const d = parseToDateOnly(r.waktu_pakai || r.created_at) || '';
-    const mk = monthKey(d);
-    if (!mk) return;
-    if (!months.has(mk)) months.set(mk, newAccumulator());
-    accumulate(months.get(mk), r);
-  });
-  const header = pivotHeader('Bulan');
-  const body = [...months.keys()].sort().map(k => pivotRowOut(k, months.get(k)));
-  return { header, body };
-}
-function newAccumulator(){
-  return {
-    totalOrders: 0, totalPorsi: 0, totalBiaya: 0,
-    status: Object.fromEntries(STATUS_LIST.map(s=>[s,0])),
-    jenis:  Object.fromEntries(JENIS_LIST.map(j=>[j,0]))
-  };
-}
-function accumulate(acc, r){
-  acc.totalOrders++;
-  acc.totalPorsi += num0(r.porsi);
-  acc.totalBiaya += calcTotalBiaya(r);
-  if (acc.status[r.status] != null) acc.status[r.status]++;
-  if (acc.jenis[r.jenis]   != null) acc.jenis[r.jenis]++;
-}
-function pivotHeader(firstColName='Tanggal'){
-  return [
-    firstColName,'Total Pesanan','Total Porsi','Total Biaya (Rp)',
-    ...STATUS_LIST.map(s=>'# '+s),
-    ...JENIS_LIST.map(j=>'# '+j)
-  ];
-}
-function pivotRowOut(key, acc){
-  return [
-    key,
-    acc.totalOrders,
-    acc.totalPorsi,
-    acc.totalBiaya,
-    ...STATUS_LIST.map(s=>acc.status[s]),
-    ...JENIS_LIST.map(j=>acc.jenis[j])
-  ];
-}
-function autoFitColumns(ws, rows, columns){
-  const colsArr = Array.isArray(columns)
-    ? columns
-    : (rows && rows.length ? Object.keys(rows[0]) : []);
-  const lens = colsArr.map(c => Math.max(String(c).length, ...rows.map(r => String(r[c] ?? '').length)));
-  ws['!cols'] = lens.map(w => ({ wch: Math.min(Math.max(w + 2, 10), 50) }));
-}
 
-function autoFitAOA(ws, aoa){
-  const cols = new Array(Math.max(...aoa.map(r=>r.length))).fill(0);
-  aoa.forEach(r => r.forEach((v,i) => { cols[i] = Math.max(cols[i], String(v ?? '').length); }));
-  ws['!cols'] = cols.map(w => ({ wch: Math.min(Math.max(w + 2, 8), 50) }));
-}
-function safeSheetName(name){
-  return String(name).replace(/[\\/?*\[\]:]/g,'_').slice(0,31) || 'Sheet';
-}
-
-function safeReplaceAll(str, find, repl){
-  if (str && typeof str.replaceAll === 'function') return str.replaceAll(find, repl);
-  return String(str || '').split(find).join(repl);
-}
-
-// ===== Export XLSX (multi-sheet) =====
+// -------- Export XLSX --------
 function exportXlsx(){
   try {
     if (!Array.isArray(rp.data) || rp.data.length === 0){
@@ -332,39 +385,38 @@ function exportXlsx(){
       XLSX.utils.book_append_sheet(wb, ws, safeSheetName('Jenis_'+jns));
     }
 
-    // PIVOT Harian
+    // Pivot Harian
     const pvD = pivotDaily(rp.data);
     const aoaD = [pvD.header, ...pvD.body];
     const wsPvD = XLSX.utils.aoa_to_sheet(aoaD);
     autoFitAOA(wsPvD, aoaD);
     XLSX.utils.book_append_sheet(wb, wsPvD, 'Pivot_Daily');
 
-    // PIVOT Bulanan
+    // Pivot Bulanan
     const pvM = pivotMonthly(rp.data);
     const aoaM = [pvM.header, ...pvM.body];
     const wsPvM = XLSX.utils.aoa_to_sheet(aoaM);
     autoFitAOA(wsPvM, aoaM);
     XLSX.utils.book_append_sheet(wb, wsPvM, 'Pivot_Monthly');
 
-    // Nama file (fallback if replaceAll not available)
+    // Nama file
     const from = safeReplaceAll(rp.els.from.value||'', '-', '');
     const to   = safeReplaceAll(rp.els.to.value||'', '-', '');
     const name = `Laporan_MessSRIE_${from||'ALL'}_${to||'ALL'}.xlsx`;
 
     XLSX.writeFile(wb, name);
   } catch (e) {
-    console.error('[exportXlsx] error:', e);
     toastError(e && e.message ? e.message : 'Gagal export.');
   }
 }
 
-
+// -------- Summary untuk XLSX --------
 function buildSummary(list){
   const countByStatus = Object.fromEntries(STATUS_LIST.map(s=>[s,0]));
   const countByJenis  = Object.fromEntries(JENIS_LIST.map(j=>[j,0]));
   let totalPorsi = 0, totalBiaya = 0;
 
-  list.forEach(r=>{
+  (list||[]).forEach(r=>{
     if (countByStatus[r.status]!=null) countByStatus[r.status]++;
     if (countByJenis[r.jenis]!=null)  countByJenis[r.jenis]++;
     totalPorsi += num0(r.porsi);
@@ -382,7 +434,7 @@ function buildSummary(list){
   return s;
 }
 
-// ===== Print-friendly =====
+// -------- Print-friendly --------
 function printReport(){
   if (!Array.isArray(rp.data) || rp.data.length === 0){
     return toastError('Tidak ada data untuk dicetak.');
@@ -410,11 +462,11 @@ function printReport(){
   const pvD = pivotDaily(rp.data);
   const pvM = pivotMonthly(rp.data);
 
-  // Chart image (opsional, jika chart ada)
+  // Chart image (jika ada)
   const imgStatus = tryCanvasImage('chStatus');
   const imgJenis  = tryCanvasImage('chJenis');
 
-  // Orders (ringkas, batasi 200 baris biar ramah print)
+  // Orders (preview max 200 baris)
   const { cols, rows } = buildOrdersRows(rp.data.slice(0, 200));
 
   const css = `
@@ -489,6 +541,7 @@ function tryCanvasImage(canvasId){
   try { return c.toDataURL('image/png'); } catch(_){ return ''; }
 }
 
+// -------- Render HTML tabel sederhana --------
 function renderTable(cols, rows){
   const colsArr = Array.isArray(cols)
     ? cols
@@ -497,7 +550,6 @@ function renderTable(cols, rows){
   const tbody = rows.map(r => '<tr>' + colsArr.map(c=>`<td>${esc(r[c] ?? '')}</td>`).join('') + '</tr>').join('');
   return `<table class="mb16"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
 }
-
 function renderAOATable(aoa){
   const [head, ...body] = aoa;
   const thead = '<tr>' + head.map(c=>`<th>${esc(c)}</th>`).join('') + '</tr>';
@@ -505,3 +557,7 @@ function renderAOATable(aoa){
   return `<table class="mb16"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
 }
 function esc(s){ return String(s).replace(/[&<>"']/g, m=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// ------ catatan ------
+// - Fungsi util eksternal yang dipakai: apiPost, getSession, withBtnBusy, toastSuccess, toastError.
+// - Pastikan Chart.js & SheetJS (XLSX) sudah dimuat di index.html.
