@@ -1,3 +1,29 @@
+// ==== NUMERIC HELPERS (baru) ====
+// Konversi string "12.000", "12,5", "Rp 12.000" -> number 12000 / 12.5
+function toNumberStrict(v){
+  if (v === '' || v == null) return null;
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  let s = String(v).trim();
+  // buang simbol non-angka kecuali . , - 
+  s = s.replace(/[^\d,.-]/g,'');
+  // anggap format Indonesia: titik = thousand, koma = decimal
+  // ubah ribuan titik -> kosong, koma -> titik
+  s = s.replace(/\./g,'').replace(/,/g,'.');
+  const n = Number(s);
+  return isFinite(n) ? n : null;
+}
+function num0(v){ const n = toNumberStrict(v); return n==null || isNaN(n) ? 0 : n; }
+// hitung total biaya dgn fallback
+function calcTotalBiaya(row){
+  const pr = num0(row.price_per_porsi);
+  const po = num0(row.porsi);
+  const tb = toNumberStrict(row.total_biaya);
+  // jika total_biaya valid & >0, pakai itu; jika tidak, fallback ke pr*po
+  const fallback = pr * po;
+  return (tb!=null && !isNaN(tb) && tb>0) ? tb : (isFinite(fallback) ? fallback : 0);
+}
+
+
 // ==== REPORT & EXPORT (Admin + Mess) ====
 // Menggunakan getOrders (role-aware) + Chart.js + SheetJS
 // Fitur tambahan: multi-sheet export (per Status & Jenis), Pivot Harian & Bulanan, Print-friendly
@@ -76,13 +102,15 @@ async function loadReport(){
 
     // Simpan apa adanya, tapi koersi tipe angka ke number/null.
     rp.data = (Array.isArray(res.orders) ? res.orders : []).map(r=>{
-      const porsi = Number(r.porsi);
-      const price = r.price_per_porsi === '' || r.price_per_porsi == null ? null : Number(r.price_per_porsi);
-      const total = r.total_biaya   === '' || r.total_biaya   == null ? null : Number(r.total_biaya);
+      const porsi = num0(r.porsi);
+      const price = toNumberStrict(r.price_per_porsi);
+      const total = toNumberStrict(r.total_biaya);
       return Object.assign({}, r, {
-        porsi: isNaN(porsi) ? 0 : porsi,
-        price_per_porsi: (price!=null && !isNaN(price)) ? price : null,
-        total_biaya:     (total!=null && !isNaN(total)) ? total : null
+        porsi: porsi,
+        price_per_porsi: (price!=null ? price : null),
+        total_biaya:     (total!=null ? total : null),
+        // siapkan kolom turunan agar konsisten dipakai tabel/export
+        _total_calc: calcTotalBiaya({ price_per_porsi: price, porsi, total_biaya: total })
       });
     });
 
@@ -95,15 +123,25 @@ async function loadReport(){
 
 function resetFilters(){ rp.els.status.value=''; rp.els.jenis.value=''; }
 
+// === CCTV (opsional) ===
+const DEBUG_CCTV = false;
+if (DEBUG_CCTV) {
+  console.group('[CCTV] Sampel perhitungan total_biaya');
+  (rp.data || []).slice(0, 10).forEach((r,i)=>{
+    const pr = num0(r.price_per_porsi), po = num0(r.porsi);
+    const tbRaw = toNumberStrict(r.total_biaya);
+    const tt = calcTotalBiaya(r);
+    console.log(`#${i+1}`, { id:r.id, pr, po, tbRaw, total_calc: tt, status:r.status, jenis:r.jenis });
+  });
+  console.groupEnd();
+}
+
 function renderKpis(list){
   let total = 0, porsi = 0, biaya = 0, done = 0;
   (list || []).forEach(r=>{
     total++;
-    const pr = Number(r.price_per_porsi) || 0;
-    const po = Number(r.porsi) || 0;
-    const tt = (Number(r.total_biaya) || (pr * po)) || 0; // fallback kalau lama kosong
-    porsi += po;
-    biaya += tt;
+    porsi += num0(r.porsi);
+    biaya += calcTotalBiaya(r);
     if (r.status === 'Selesai') done++;
   });
   rp.els.kpiTotal.textContent = total.toLocaleString('id-ID');
@@ -111,7 +149,6 @@ function renderKpis(list){
   rp.els.kpiBiaya.textContent = biaya.toLocaleString('id-ID');
   rp.els.kpiDone.textContent  = done.toLocaleString('id-ID');
 }
-
 function renderCharts(list){
   // Destroy chart lama agar tidak dobel
   if (rp.charts.status){ rp.charts.status.destroy(); rp.charts.status = null; }
@@ -148,9 +185,9 @@ function renderCharts(list){
 function buildOrdersRows(data){
   const cols = ['id','created_at','username','display_name','jenis','waktu_pakai','porsi','kegiatan','allocated_mess','status','price_per_porsi','total_biaya','catatan'];
   const rows = (data || []).map(r => {
-    const pr = Number(r.price_per_porsi) || 0;
-    const po = Number(r.porsi) || 0;
-    const tt = (Number(r.total_biaya) || (pr * po)) || 0; // fallback
+    const pr = num0(r.price_per_porsi);
+    const po = num0(r.porsi);
+    const tt = calcTotalBiaya(r);
     return {
       id: r.id ?? '',
       created_at: r.created_at ?? '',
@@ -169,7 +206,6 @@ function buildOrdersRows(data){
   });
   return { cols, rows };
 }
-
 function groupBy(data, keyFn){
   const m = new Map();
   data.forEach(item => {
@@ -213,8 +249,8 @@ function newAccumulator(){
 }
 function accumulate(acc, r){
   acc.totalOrders++;
-  acc.totalPorsi += (+r.porsi||0);
-  acc.totalBiaya += (+r.total_biaya||0);
+  acc.totalPorsi += num0(r.porsi);
+  acc.totalBiaya += calcTotalBiaya(r);
   if (acc.status[r.status] != null) acc.status[r.status]++;
   if (acc.jenis[r.jenis]   != null) acc.jenis[r.jenis]++;
 }
@@ -331,8 +367,8 @@ function buildSummary(list){
   list.forEach(r=>{
     if (countByStatus[r.status]!=null) countByStatus[r.status]++;
     if (countByJenis[r.jenis]!=null)  countByJenis[r.jenis]++;
-    totalPorsi += (+r.porsi||0);
-    totalBiaya += (+r.total_biaya||0);
+    totalPorsi += num0(r.porsi);
+    totalBiaya += calcTotalBiaya(r);
   });
 
   const s = [['Ringkasan','',''],['Total Pesanan', list.length, '']];
