@@ -134,6 +134,7 @@ window.refreshUiTabsForCurrentRole = function(){
 };
 
 // ===== Login flow =====
+// ===== Login flow =====
 async function handleLogin(){
   const username = document.getElementById('loginUsername').value.trim();
   const password = document.getElementById('loginPassword').value;
@@ -149,10 +150,17 @@ async function handleLogin(){
     await loadUiTabsConfig();
     // 2) Tampilkan navbar sesuai role
     applyRoleUI(data.role);
+
+    // (NEW) Prime cache + langsung refresh opsi Jenis dari Master Data
     await primePriceCacheFromServer();
-    await safeLoadUiTabsConfig();
+    if (typeof window.refreshJenisOptionsFromMaster === 'function') {
+      try { await window.refreshJenisOptionsFromMaster(); } catch(_) {}
+    }
+
     // 3) Init umum
+    await safeLoadUiTabsConfig();
     await initAfterLogin();
+
     // 4) Daftarkan lazy init
     setupLazyTabInit(data.role);
 
@@ -162,6 +170,7 @@ async function handleLogin(){
     btnLogin.disabled = false;
   }
 }
+
 
 btnLogin.addEventListener('click', handleLogin);
 btnLogout.addEventListener('click', async ()=>{
@@ -180,7 +189,13 @@ window.addEventListener('DOMContentLoaded', ()=>{
     try {
       await loadUiTabsConfig();
       applyRoleUI(sess.role);
+
+      // (NEW) Prime cache + langsung refresh opsi Jenis dari Master Data
       await primePriceCacheFromServer();
+      if (typeof window.refreshJenisOptionsFromMaster === 'function') {
+        try { await window.refreshJenisOptionsFromMaster(); } catch(_) {}
+      }
+
       await safeLoadUiTabsConfig();
       await initAfterLogin();
       setupLazyTabInit(sess.role);

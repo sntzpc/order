@@ -47,31 +47,33 @@ const rp = {
 async function ensureDefaultPrices(token){
   if (rp.defPrice && rp.defPrice._ready) return rp.defPrice;
 
-  const res = await apiPost('getMasterData', { token });
+  // Ambil dari cache klien (fallback ke API)
+  const res = await MasterCache.get(token);
 
-  // 1) gunakan defaultPrice dari backend bila ada
-  if (res && typeof res.defaultPrice === 'object'){
+  // 1) prefer backend defaultPrice
+  if (res && typeof res.defaultPrice === 'object') {
     const s = toNumberStrict(res.defaultPrice['Snack']);
     const n = toNumberStrict(res.defaultPrice['Nasi Kotak']);
-    if (s && s>0) rp.defPrice.Snack = s;
-    if (n && n>0) rp.defPrice['Nasi Kotak'] = n;
+    if (s && s > 0) rp.defPrice.Snack = s;
+    if (n && n > 0) rp.defPrice['Nasi Kotak'] = n;
   }
 
-  // 2) bila belum, cari dari menu default
+  // 2) fallback dari res.menu
   const menu = Array.isArray(res?.menu) ? res.menu : [];
-  ['Snack','Nasi Kotak'].forEach(jenis=>{
+  ['Snack','Nasi Kotak'].forEach(jenis => {
     if (rp.defPrice[jenis] > 0) return;
     const row = menu.find(m =>
-      String(m?.jenis||'').trim().toLowerCase() === jenis.toLowerCase() &&
+      String(m?.jenis || '').trim().toLowerCase() === jenis.toLowerCase() &&
       (m?.is_default === true || String(m?.is_default).toUpperCase() === 'TRUE')
     );
     const h = toNumberStrict(row?.harga);
-    if (h && h>0) rp.defPrice[jenis] = h;
+    if (h && h > 0) rp.defPrice[jenis] = h;
   });
 
   rp.defPrice._ready = true;
   return rp.defPrice;
 }
+
 
 // -------- Tanggal helpers --------
 function toInputDate(d){ const z=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`; }

@@ -83,11 +83,17 @@ async function messRefresh(){
 }
 
 function renderMessList(list){
+  // Sembunyikan header kolom ID (TH pertama)
+  try {
+    const th0 = _tblMess.closest('table').querySelector('thead th:first-child');
+    if (th0) th0.classList.add('d-none');
+  } catch(_) {}
+
   const isMess = isRoleMess();
   const rowsHtml = (list||[]).map(r => `
-    <tr>
-      <td>${esc(r.id)}</td>
-      <td>${esc(r.waktu_pakai)}</td>
+    <tr data-id="${esc(r.id)}">
+      <td class="d-none">${esc(r.id)}</td>
+      <td>${formatDateTimeID(r.waktu_pakai)}</td>
       <td>${esc(r.jenis)}</td>
       <td>${esc(r.porsi)}</td>
       <td>${esc(r.kegiatan)}</td>
@@ -95,8 +101,11 @@ function renderMessList(list){
       <td class="d-flex flex-wrap gap-1">${renderActions(r, isMess)}</td>
     </tr>
   `).join('');
+
+  // total kolom tetap 7 (kolom ID tersembunyi tetap dihitung), jadi colspan=7
   _tblMess.innerHTML = rowsHtml || `<tr><td colspan="7" class="text-center text-muted">Tidak ada data.</td></tr>`;
 }
+
 
 // Tampilkan hanya 1 tombol sesuai progres — dan hanya untuk role Mess.
 // Admin: tampilkan strip (—) agar kolom tetap rapi.

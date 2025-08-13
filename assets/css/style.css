@@ -25,3 +25,10 @@ table thead th, table tbody td{
   .print-only { display: none; }
 }
 
+/* === Cara baru sembunyikan kolom ID (hanya di tabel yang memang ada ID) === */
+/* Pakai di tabel lain (Admin/Mess/Setting) yang masih render kolom ID:
+   <table class="table has-id-col"> ... <th class="col-id">ID</th> ... */
+.has-id-col th.col-id,
+.has-id-col td.col-id {
+  display: none;
+}

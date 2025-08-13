@@ -174,29 +174,165 @@ async function refreshOrders(){
   }
 }
 
+// ====== Paging + Search state & refs (aman kalau elemen tidak ada) ======
+const ordSearch   = document.getElementById('ordSearch');     // <input Cari...> (opsional)
+const ordPageSize = document.getElementById('ordPageSize');   // <select 10/20/...> (opsional)
+const ordPager    = document.getElementById('ordPager');      // <nav> pager (opsional)
+const ordInfo     = document.getElementById('ordInfo');       // <div> info "Menampilkan x–y..." (opsional)
+
+const ORD = { raw: [], filtered: [], page: 1, pageSize: Number(ordPageSize?.value || 10), query: '' };
+
+// Ellipsis page list (1, 2, …, 9, 10)
+function buildPageList(curr, total){
+  if (total <= 7) return Array.from({length: total}, (_,i)=> i+1);
+  const set = new Set([1,2,total-1,total,curr-1,curr,curr+1]);
+  const arr = Array.from(set).filter(n=> n>=1 && n<=total).sort((a,b)=> a-b);
+  const out = [];
+  for (let i=0;i<arr.length;i++){
+    if (i>0 && arr[i] !== arr[i-1]+1) out.push('…');
+    out.push(arr[i]);
+  }
+  return out;
+}
+
+function applySearch(){
+  const q = (ORD.query || '').toLowerCase();
+  if (!q) { ORD.filtered = ORD.raw.slice(); return; }
+  ORD.filtered = ORD.raw.filter(r => ([
+    r.created_at, r.jenis, r.waktu_pakai, r.porsi, r.kegiatan,
+    r.mess_tujuan, r.status, r.total_biaya, r.id
+  ].some(v => v!=null && String(v).toLowerCase().includes(q))));
+}
+
+function pageSlice(){
+  const ps = Math.max(1, ORD.pageSize|0);
+  const total = ORD.filtered.length;
+  const pages = Math.max(1, Math.ceil(total/ps));
+  ORD.page = Math.min(Math.max(1, ORD.page|0), pages);
+  const start = (ORD.page-1)*ps;
+  const end   = Math.min(start+ps, total);
+  return { rows: ORD.filtered.slice(start, end), start, end, total, pages };
+}
+
+function drawOrdersPager(){
+  if (!ordPager) return;
+  const ps = Math.max(1, ORD.pageSize|0);
+  const total = ORD.filtered.length;
+  const pages = Math.max(1, Math.ceil(total/ps));
+  const curr  = Math.min(Math.max(1, ORD.page|0), pages);
+
+  const nums = buildPageList(curr, pages);
+  const li = [];
+  const btn = (label, page, disabled=false, active=false) => `
+    <li class="page-item ${disabled?'disabled':''} ${active?'active':''}">
+      <a class="page-link" href="#" data-page="${disabled ? '' : page}">${label}</a>
+    </li>`;
+  li.push(btn('«', 1, curr===1));
+  li.push(btn('‹', curr-1, curr===1));
+  nums.forEach(n=>{
+    li.push(n==='…'
+      ? `<li class="page-item disabled"><span class="page-link">…</span></li>`
+      : btn(n, n, false, n===curr));
+  });
+  li.push(btn('›', curr+1, curr===pages));
+  li.push(btn('»', pages,   curr===pages));
+
+  ordPager.innerHTML = `<ul class="pagination pagination-sm mb-0">${li.join('')}</ul>`;
+}
+
+ordPager?.addEventListener('click', (e)=>{
+  const a = e.target.closest('a[data-page]');
+  if (!a) return;
+  e.preventDefault();
+  const v = a.getAttribute('data-page');
+  if (!v) return;
+  ORD.page = Number(v);
+  drawOrdersTable();
+  drawOrdersPager();
+});
+
+ordSearch?.addEventListener('input', ()=>{
+  ORD.query = ordSearch.value.trim();
+  ORD.page = 1;
+  applySearch();
+  drawOrdersTable();
+  drawOrdersPager();
+});
+
+ordPageSize?.addEventListener('change', ()=>{
+  ORD.pageSize = Number(ordPageSize.value) || 10;
+  ORD.page = 1;
+  drawOrdersTable();
+  drawOrdersPager();
+});
+
+// ==== DROP-IN REPLACEMENT: renderOrders(list) ====
 function renderOrders(list){
-  tblOrders.innerHTML = '';
-  for (const r of list){
+  // deteksi apakah header pertama memang "ID"; kalau ya, baru kita sembunyikan TH pertama
+  try {
+    const table = tblOrders.closest('table');
+    const firstTh = table?.querySelector('thead th:first-child');
+    const isIdHeader = firstTh && String(firstTh.textContent || '').trim().toLowerCase() === 'id';
+    if (isIdHeader) firstTh.classList.add('d-none');
+  } catch(_) {}
+
+  const data = Array.isArray(list) ? list : [];
+  ORD.raw = data.slice();
+  ORD.pageSize = Number(ordPageSize?.value || 10);
+  ORD.page = 1;
+  ORD.query = ordSearch?.value?.trim?.() || '';
+  applySearch();
+  drawOrdersTable();
+  drawOrdersPager();
+}
+
+// ====== RENDER body + info (dinamis 8/9 kolom) ======
+function drawOrdersTable(){
+  const { rows, start, end, total } = pageSlice();
+
+  // hitung jumlah header kolom utk colspan & apakah ada kolom ID di header
+  const table   = tblOrders.closest('table');
+  const ths     = table ? table.querySelectorAll('thead th') : null;
+  const thCount = ths ? ths.length : 8; // fallback 8 kolom (tanpa ID)
+  const firstIsID = ths && ths[0] && String(ths[0].textContent || '').trim().toLowerCase() === 'id';
+
+  if (rows.length === 0){
+    tblOrders.innerHTML = `<tr><td colspan="${thCount}" class="text-center text-muted">Belum ada data.</td></tr>`;
+    if (ordInfo) ordInfo.textContent = 'Menampilkan 0–0 dari 0 data';
+    return;
+  }
+
+  tblOrders.innerHTML = rows.map(r=>{
     const totalDisplay =
       (r.total_biaya === '' || r.total_biaya == null)
-        ? ''                           // biarkan kosong untuk order lama yg belum ada total
-        : rupiah(+r.total_biaya || 0); // kalau ada angkanya, tampilkan
+        ? ''
+        : rupiah(+r.total_biaya || 0);
 
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${esc(r.id)}</td>
-      <td>${esc(r.created_at)}</td>
-      <td>${esc(r.jenis)}</td>
-      <td>${esc(r.waktu_pakai)}</td>
-      <td>${esc(r.porsi)}</td>
-      <td>${esc(r.kegiatan)}</td>
-      <td>${esc(r.mess_tujuan||'-')}</td>
-      <td>${esc(r.status)}</td>
-      <td class="text-end">${totalDisplay}</td>
+    // bangun sel: jika header memang punya kolom ID, render TD ID tersembunyi agar jumlah kolom pas
+    const tdId = firstIsID ? `<td class="d-none">${esc(r.id || '')}</td>` : '';
+
+    return `
+      <tr data-id="${esc(r.id || '')}">
+        ${tdId}
+        <td>${formatDateTimeID(r.created_at)}</td>
+        <td>${esc(r.jenis)}</td>
+        <td>${formatDateTimeID(r.waktu_pakai)}</td>
+        <td>${esc(r.porsi)}</td>
+        <td>${esc(r.kegiatan)}</td>
+        <td>${esc(r.mess_tujuan||'-')}</td>
+        <td>${esc(r.status)}</td>
+        <td class="text-end">${totalDisplay}</td>
+      </tr>
     `;
-    tblOrders.appendChild(tr);
+  }).join('');
+
+  if (ordInfo){
+    const a = total ? (start+1) : 0;
+    const b = end;
+    ordInfo.textContent = `Menampilkan ${a}–${b} dari ${total} data`;
   }
 }
+
 
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;' }[m])); }
 
@@ -300,4 +436,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }
 });
 
-
+document.addEventListener('DOMContentLoaded', function(){
+  window.refreshJenisOptionsFromMaster && window.refreshJenisOptionsFromMaster();
+});

@@ -56,32 +56,67 @@ async function adminRefresh(){
   renderAdminPending(res.orders || [], md.messList || []);
 }
 
-function renderAdminPending(list, messList){
-  _tblAdminPending.innerHTML = '';
-  const opts = (messList||[]).map(m=>`<option value="${esc(m.nama)}">${esc(m.nama)}</option>`).join('');
-  const html = (list||[]).map(r=>{
-    const selId = 'selMess_'+r.id;
-    return `
-      <tr>
-        <td>${esc(r.id)}</td>
-        <td>${esc(r.waktu_pakai)}</td>
-        <td>${esc(r.jenis)}</td>
-        <td>${esc(r.porsi)}</td>
-        <td>${esc(r.kegiatan)}</td>
-        <td>${esc(r.display_name)}</td>
-        <td>
-          <select id="${selId}" class="form-select form-select-sm">
-            <option value="">- pilih mess -</option>${opts}
-          </select>
-        </td>
-        <td class="d-flex gap-1">
-          <button class="btn btn-sm btn-success" data-act="approve" data-id="${esc(r.id)}">Approve</button>
-          <button class="btn btn-sm btn-outline-danger" data-act="reject"  data-id="${esc(r.id)}">Reject</button>
-        </td>
-      </tr>`;
-  }).join('');
-  _tblAdminPending.innerHTML = html;
+function renderAdminPending(list, messOptions = []) {
+  const tb = document.getElementById('tblAdminPending');
+  if (!tb) return;
+  if (!Array.isArray(list) || list.length === 0) {
+    tb.innerHTML = '<tr><td colspan="7" class="text-muted">Tidak ada pesanan.</td></tr>';
+    return;
+  }
+
+  // options mess tujuan
+  const messOpts = ['<option value="">- pilih mess -</option>']
+    .concat(messOptions.map(n => `<option>${escHTML(n)}</option>`))
+    .join('');
+
+  tb.innerHTML = list.map(o => `
+    <tr data-id="${escHTML(o.id)}">
+      <td>${formatDateTimeID(o.waktu_pakai)}</td>
+      <td>${escHTML(o.jenis)}</td>
+      <td class="text-end">${Number(o.porsi||0)}</td>
+      <td>${escHTML(o.kegiatan||'')}</td>
+      <td>${escHTML(o.display_name||o.username||'')}</td>
+      <td>
+        <select class="form-select form-select-sm sel-mess">
+          ${messOpts.replace(`>${escHTML(o.allocated_mess||'')}<`, ` selected>${escHTML(o.allocated_mess||'')}<`)}
+        </select>
+      </td>
+      <td class="text-nowrap">
+        <button class="btn btn-sm btn-primary btn-alloc">Alokasikan</button>
+        <button class="btn btn-sm btn-outline-danger btn-reject">Tolak</button>
+      </td>
+    </tr>
+  `).join('');
+
+  // wiring aksi
+  tb.querySelectorAll('.btn-alloc').forEach(btn=>{
+    btn.addEventListener('click', async e=>{
+      const tr = e.target.closest('tr');
+      const id = tr.dataset.id;
+      const messName = tr.querySelector('.sel-mess').value.trim();
+      if (!messName) return Swal.fire('Info', 'Pilih Mess terlebih dahulu.', 'info');
+      await withBtnBusy(btn, async ()=>{
+        const sess = getSession();
+        await apiPost('adminAllocate', { token: sess.token, id, allocated_mess: messName });
+        toastSuccess('Dialokasikan.');
+      });
+    });
+  });
+  tb.querySelectorAll('.btn-reject').forEach(btn=>{
+    btn.addEventListener('click', async e=>{
+      const tr = e.target.closest('tr');
+      const id = tr.dataset.id;
+      const { value: reason } = await Swal.fire({input:'text', title:'Alasan penolakan', inputPlaceholder:'Opsional', showCancelButton:true});
+      if (reason === undefined) return;
+      await withBtnBusy(btn, async ()=>{
+        const sess = getSession();
+        await apiPost('adminReject', { token: sess.token, id, reason: reason||'' });
+        toastSuccess('Ditolak.');
+      });
+    });
+  });
 }
+
 
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;' }[m])); }
 
