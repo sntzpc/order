@@ -462,6 +462,81 @@
     </div>
   </div>
 
+  <script>
+(() => {
+  function showBusy(btn, label) {
+    if (!btn || btn.dataset.busy === '1') return () => {};
+    btn.dataset.busy = '1';
+    btn.dataset.origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML =
+      '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>' +
+      (label || 'Memproses…');
+    return function restore() {
+      btn.disabled = false;
+      if (btn.dataset.origHtml) btn.innerHTML = btn.dataset.origHtml;
+      btn.removeAttribute('data-busy');
+      delete btn.dataset.origHtml;
+    };
+  }
+
+  // Tahan double-click saat sudah busy
+  function guardIfBusy(e) {
+    const btn = e.currentTarget;
+    if (btn.dataset.busy === '1') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }
+
+  function bindLoginBusy() {
+    const btn = document.getElementById('btnLogin');
+    const appWrap = document.getElementById('appWrap');
+    if (!btn || !appWrap) return;
+
+    // Capturing: jalankan sebelum handler lain supaya spinner langsung muncul
+    btn.addEventListener('click', function (e) {
+      if (btn.dataset.busy === '1') return guardIfBusy(e);
+      const restore = showBusy(btn, 'Masuk…');
+
+      // Sukses login -> #appWrap di-unhide
+      let done = false;
+      const finish = () => { if (done) return; done = true; restore(); };
+
+      const mo = new MutationObserver(() => {
+        if (!appWrap.classList.contains('d-none')) {
+          mo.disconnect();
+          finish();
+        }
+      });
+      mo.observe(appWrap, { attributes: true, attributeFilter: ['class'] });
+
+      // Fallback kalau gagal / timeout
+      setTimeout(() => { mo.disconnect(); finish(); }, 8000);
+    }, true);
+  }
+
+  function bindOrderBusy() {
+    const btn = document.getElementById('btnSubmit');
+    if (!btn) return;
+
+    btn.addEventListener('click', function (e) {
+      if (btn.dataset.busy === '1') return guardIfBusy(e);
+      const restore = showBusy(btn, 'Mengirim…');
+
+      // Fallback auto-restore; jika order.js sudah melakukan reset form/alert,
+      // user sudah aware proses selesai meski tombol masih disable sebentar.
+      setTimeout(restore, 8000);
+    }, true);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    bindLoginBusy();
+    bindOrderBusy();
+  });
+})();
+</script>
+
 </body>
 
 </html>
