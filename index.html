@@ -70,11 +70,59 @@
               <input type="password" id="loginPassword" class="form-control" autocomplete="current-password">
             </div>
             <button id="btnLogin" class="btn btn-primary w-100">Masuk</button>
-            <div class="form-text mt-2">Admin default: <code>admin/admin</code> (ubah di Setting).</div>
+            <!-- di dalam #view-login, di bawah <button id="btnLogin" ...> -->
+            <div class="text-center mt-3">
+              <small class="text-muted">Belum punya akun?
+                <a href="#register" id="lnkToRegister" class="text-decoration-underline">Daftar</a>
+              </small>
+            </div>
+            <hr />
+            <small class="text-muted">Notifikasi Via Telegram <a style="text-decoration: underline; color:#020202;"
+                href="http://t.me/order_sriegBot">Order SRIE</a></small>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- REGISTER -->
+    <section id="view-register" class="container d-none" style="max-width:520px;">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Pendaftaran Akun</h5>
+          <form id="frm-register" autocomplete="off">
+            <div class="mb-3">
+              <label class="form-label">Nama Lengkap</label>
+              <input id="reg-fullname" class="form-control" placeholder="mis. Budi Santoso" required>
+              <div class="form-text">Username direkomendasikan dari nama depan (huruf kecil).</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Username</label>
+              <input id="reg-username" class="form-control" placeholder="mis. budi" required>
+              <div class="form-text">Huruf kecil, tanpa spasi. Contoh: <code>budi</code>, <code>budi.s</code>,
+                <code>budi_s</code>.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input id="reg-password" type="password" class="form-control" value="user123" required>
+              <div class="form-text">Disarankan gunakan <b>user123</b> lalu ganti setelah login.</div>
+            </div>
+
+            <!-- Opsional: Telegram ID -->
+            <div class="mb-3">
+              <label class="form-label">Telegram ID <span class="text-muted">(opsional)</span></label>
+              <input id="reg-tele" class="form-control" inputmode="numeric" pattern="[0-9\-]*"
+                placeholder="mis. 123456789">
+              <div class="form-text">Isi untuk menerima notifikasi via bot.</div>
+            </div>
+
+            <div class="d-flex justify-content-between">
+              <button type="button" id="btn-reg-back" class="btn btn-light">Kembali</button>
+              <button type="submit" id="btn-reg-submit" class="btn btn-primary">Daftar</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
 
     <!-- APP CONTENT -->
     <div id="appWrap" class="d-none">
@@ -169,22 +217,22 @@
               <input type="date" id="fltTo" class="form-control">
             </div>
             <div class="row g-2 align-items-center mt-2">
-  <div class="col-md-6 d-flex align-items-center gap-2">
-    <label class="text-muted small mb-0">Tampil</label>
-    <select id="ordPageSize" class="form-select form-select-sm" style="width:auto">
-      <option>10</option>
-      <option>20</option>
-      <option>50</option>
-      <option>100</option>
-      <option>500</option>
-    </select>
-    <span class="text-muted small">baris</span>
-  </div>
-  <div class="col-md-6 d-flex justify-content-end gap-2">
-    <input id="ordSearch" class="form-control form-control-sm" placeholder="Cari...">
-    <button id="btnRefreshOrders" class="btn btn-outline-primary btn-sm">Refresh</button>
-  </div>
-</div>
+              <div class="col-md-6 d-flex align-items-center gap-2">
+                <label class="text-muted small mb-0">Tampil</label>
+                <select id="ordPageSize" class="form-select form-select-sm" style="width:auto">
+                  <option>10</option>
+                  <option>20</option>
+                  <option>50</option>
+                  <option>100</option>
+                  <option>500</option>
+                </select>
+                <span class="text-muted small">baris</span>
+              </div>
+              <div class="col-md-6 d-flex justify-content-end gap-2">
+                <input id="ordSearch" class="form-control form-control-sm" placeholder="Cari...">
+                <button id="btnRefreshOrders" class="btn btn-outline-primary btn-sm">Refresh</button>
+              </div>
+            </div>
           </div>
 
           <div class="table-responsive-container mt-3">
@@ -205,9 +253,9 @@
               <tbody id="tblOrders"></tbody>
             </table>
             <div class="d-flex justify-content-between align-items-center mt-2">
-  <div id="ordInfo" class="text-muted small"></div>
-  <nav id="ordPager" aria-label="Paging daftar pesanan"></nav>
-</div>
+              <div id="ordInfo" class="text-muted small"></div>
+              <nav id="ordPager" aria-label="Paging daftar pesanan"></nav>
+            </div>
           </div>
         </div>
 
@@ -383,43 +431,43 @@
         </div>
 
         <!-- TAB: Akses (Admin only) -->
-    <div class="tab-pane fade" id="tabAccess">
-      <div class="row g-3">
-        <div class="col-lg-6">
-          <div class="card shadow-sm">
-            <div class="card-body">
-              <h6 class="card-title mb-3">Akses Tab untuk ROLE: User</h6>
-              <div id="accUserBoxes" class="row row-cols-2 g-2"></div>
-              <div class="text-end mt-3">
-                <button id="btnAccSaveUser" class="btn btn-primary">
-                  Simpan Akses User
-                </button>
-              </div>
-              <div class="form-text mt-2">
-                Catatan: Tab yang dicentang akan terlihat untuk pengguna dengan role <b>User</b>.
+        <div class="tab-pane fade" id="tabAccess">
+          <div class="row g-3">
+            <div class="col-lg-6">
+              <div class="card shadow-sm">
+                <div class="card-body">
+                  <h6 class="card-title mb-3">Akses Tab untuk ROLE: User</h6>
+                  <div id="accUserBoxes" class="row row-cols-2 g-2"></div>
+                  <div class="text-end mt-3">
+                    <button id="btnAccSaveUser" class="btn btn-primary">
+                      Simpan Akses User
+                    </button>
+                  </div>
+                  <div class="form-text mt-2">
+                    Catatan: Tab yang dicentang akan terlihat untuk pengguna dengan role <b>User</b>.
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
 
-        <div class="col-lg-6">
-          <div class="card shadow-sm">
-            <div class="card-body">
-              <h6 class="card-title mb-3">Akses Tab untuk ROLE: Mess</h6>
-              <div id="accMessBoxes" class="row row-cols-2 g-2"></div>
-              <div class="text-end mt-3">
-                <button id="btnAccSaveMess" class="btn btn-primary">
-                  Simpan Akses Mess
-                </button>
-              </div>
-              <div class="form-text mt-2">
-                Catatan: Tab yang dicentang akan terlihat untuk pengguna dengan role <b>Mess</b>.
+            <div class="col-lg-6">
+              <div class="card shadow-sm">
+                <div class="card-body">
+                  <h6 class="card-title mb-3">Akses Tab untuk ROLE: Mess</h6>
+                  <div id="accMessBoxes" class="row row-cols-2 g-2"></div>
+                  <div class="text-end mt-3">
+                    <button id="btnAccSaveMess" class="btn btn-primary">
+                      Simpan Akses Mess
+                    </button>
+                  </div>
+                  <div class="form-text mt-2">
+                    Catatan: Tab yang dicentang akan terlihat untuk pengguna dengan role <b>Mess</b>.
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
       </div>
     </div>
@@ -468,6 +516,7 @@
   <script src="assets/js/report.js"></script>
   <script src="assets/js/access.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="assets/js/router.js"></script>
 
   <div id="appBusy" class="position-fixed top-0 start-0 w-100 h-100 d-none"
     style="background:rgba(255,255,255,.6); z-index:2000;">
@@ -476,107 +525,6 @@
       <div class="mt-2 small text-secondary">Memproses…</div>
     </div>
   </div>
-
-  <script>
-(() => {
-  function showBusy(btn, label) {
-    if (!btn || btn.dataset.busy === '1') return () => {};
-    btn.dataset.busy = '1';
-    btn.dataset.origHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML =
-      '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>' +
-      (label || 'Memproses…');
-    return function restore() {
-      btn.disabled = false;
-      if (btn.dataset.origHtml) btn.innerHTML = btn.dataset.origHtml;
-      btn.removeAttribute('data-busy');
-      delete btn.dataset.origHtml;
-    };
-  }
-
-  // Tahan double-click saat sudah busy
-  function guardIfBusy(e) {
-    const btn = e.currentTarget;
-    if (btn.dataset.busy === '1') {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    }
-  }
-
-  function bindLoginBusy() {
-    const btn = document.getElementById('btnLogin');
-    const appWrap = document.getElementById('appWrap');
-    if (!btn || !appWrap) return;
-
-    // Capturing: jalankan sebelum handler lain supaya spinner langsung muncul
-    btn.addEventListener('click', function (e) {
-      if (btn.dataset.busy === '1') return guardIfBusy(e);
-      const restore = showBusy(btn, 'Masuk…');
-
-      // Sukses login -> #appWrap di-unhide
-      let done = false;
-      const finish = () => { if (done) return; done = true; restore(); };
-
-      const mo = new MutationObserver(() => {
-        if (!appWrap.classList.contains('d-none')) {
-          mo.disconnect();
-          finish();
-        }
-      });
-      mo.observe(appWrap, { attributes: true, attributeFilter: ['class'] });
-
-      // Fallback kalau gagal / timeout
-      setTimeout(() => { mo.disconnect(); finish(); }, 8000);
-    }, true);
-  }
-
-  function bindOrderBusy() {
-    const btn = document.getElementById('btnSubmit');
-    if (!btn) return;
-
-    btn.addEventListener('click', function (e) {
-      if (btn.dataset.busy === '1') return guardIfBusy(e);
-      const restore = showBusy(btn, 'Mengirim…');
-
-      // Fallback auto-restore; jika order.js sudah melakukan reset form/alert,
-      // user sudah aware proses selesai meski tombol masih disable sebentar.
-      setTimeout(restore, 8000);
-    }, true);
-  }
-
-  document.addEventListener('DOMContentLoaded', () => {
-    bindLoginBusy();
-    bindOrderBusy();
-  });
-})();
-
-// Load eksternal script hanya sekali
-  function loadScriptOnce(src) {
-    return new Promise((resolve, reject) => {
-      if (document.querySelector(`script[data-once="${src}"]`)) return resolve();
-      const s = document.createElement('script');
-      s.src = src; s.async = true; s.defer = true; s.dataset.once = src;
-      s.onload = resolve; s.onerror = reject;
-      document.head.appendChild(s);
-    });
-  }
-
-  // Jalankan reportInit saat tab Report baru pertama kali ditampilkan
-  document.addEventListener('DOMContentLoaded', () => {
-    const reportTabLink = document.querySelector('a[href="#tabReport"]');
-    if (!reportTabLink) return;
-    let booted = false;
-    reportTabLink.addEventListener('shown.bs.tab', async () => {
-      if (booted) return; booted = true;
-      // muat library berat hanya saat perlu
-      await loadScriptOnce('https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js');
-      await loadScriptOnce('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
-      if (window.reportInit) window.reportInit();
-    }, { once: true });
-  });
-
-</script>
 
 </body>
 
